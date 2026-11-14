@@ -20,6 +20,9 @@ Companion documents:
 - [c-ir-spec.md](c-ir-spec.md) — the C-IR interchange format (v0.1): the dumper↔backend
   contract of §4.0, canonical-bytes serialization, pinned castKind enum.
 
+Corrections tagged **(F*n*)** were re-probed on daScript `6401904cf9` (2026-11-14); the tag is a
+plain label. A ✓ that the re-probe did not bear out is corrected in place and tagged. Where the
+translator emits a different shape on purpose, the text says what it emits and why.
 ## 1. Decisions locked (discussion 2026-08-21)
 
 | Decision | Choice | Why |
@@ -33,6 +36,7 @@ Companion documents:
 | C dialect | C99 minus VLAs (`setjmp/longjmp` supported — try/recover lowering, probed 2026-08-21) | Covers Doom (C89-era), Lua 5.4 incl. `pcall` (ANSI), and the practical bulk of the suites |
 | Target ABI | `int`=32, `long`=32, `long long`=64, pointers = native das pointers | Matches MSVC x64 (LLP64) — same ABI as the native baseline we diff against |
 | UB policy | Signed overflow wraps (das is built `-fwrapv`), shifts as hardware, eval order fixed left-to-right | Documented dialect, matches what csmith-safe programs assume |
+| Loop lowering | **Range form by default** (ruling 2026-11-01 (13), F66): a canonical counting loop is a das range loop and a `for` body without `continue` takes its increment last; `--loops while` and the sidecar's `"loops": "while"` keep the `while` forms; O1 is therefore not sidecar-gated (section 6 and `lowering-examples.md` "General for" state the four loop shapes); O2 and O3 stay gated after demo sync | Readable and faster at once: the range form is the readable mapping this table's "Output quality" row asks for, and the translator measured it at -63% interp on `primes` alone and the trailing increment at -29% against `finally` and -49% against the flag |
 
 ## 2. Success metrics (the only numbers that matter)
 
@@ -67,14 +71,14 @@ Everything below ran green in one probe script; the P0 phase re-runs it as a che
 | `double`, `@@fn` + `invoke` | Work | C `double` and function pointers direct |
 | **Data structures** (probed 2026-08-21, round 2) | | |
 | Struct copy `b = a` | Deep POD copy incl. `int[4]` members + nested structs; bare `f2 = f1` fixed-array copy too | No clone helpers for POD — plain `=` emission |
-| `var s : S` param | **Reference** semantics (caller sees writes) | C by-value = emit callee-side local copy; struct return-by-value works |
-| Layout | `{int;int16}`=8, offsets natural; `{int8;int64;double}` → 8/16, size 24; `bool`=1 | **Matches clang/MSVC x64 exactly** for unpacked structs — `sizeof`/`offsetof` foldable either side; packed structs stay marshal-only |
+| `var s : S` param | **Reference** semantics (caller sees writes) | C by-value = emit callee-side local copy, for every record parameter, written or not: a `let` record parameter is the caller's object too (F50); struct return-by-value works |
+| Layout | `{int;int16}`=8, offsets natural; `{int8;int64;double}` → 8/16, size 24; `bool`=1 | **Matches clang/MSVC x64 exactly** for unpacked structs — `sizeof`/`offsetof` foldable either side; packed structs stay marshal-only where das cannot place the fields: the translator converts a packed record whose plain fields each sit at a multiple of their das alignment as an ordinary struct, through byte units and padding fields (F51) |
 | `int[2][3]` | size 24, row stride 12, col stride 4 | Same memory order + index order as C `int m[2][3]` |
 | Struct/array literals | `MobjLike(id = 3, speed = 8)` named-init; partial init zeroes rest (= C rule); global `T[N] = fixed_array(...)` of struct literals works | `info.c` giant tables emit as das global literals. **Trap:** `[1,2,3]` is a dynamic `array<int>` literal — fixed arrays require `fixed_array(...)` |
 | Self-ref structs, fn-ptr fields | `next : Node?`, `cb : function<(x:int):int>` + `invoke` | Direct |
 | **Layout law** (probed 2026-08-21, round 3) | das struct layout == clang C layout for every natural shape tested: decl order, tight small-field pack (0/1/2/4), int64/double 8-align incl. propagation through nested structs, tail padding in `sizeof` AND array-element stride, `function<>` = **8 bytes** (= C fn ptr, so fn-ptr fields keep C offsets) | Divergence only possible via `#pragma pack`/`packed`/`_Alignas` — das has no packing knob; those types are marshal-only (sidecar). Policy regardless: translate `sizeof`/`offsetof` to das-side `typeinfo sizeof` / `typeinfo offsetof<f>(type<T>)` / `typeinfo alignof` (all exist ✓) so intra-program correctness is self-consistent and never depends on the match; the match only has to hold at marshal boundaries |
 | Struct-prefix punning + container_of | `reinterpret<Thinker?>(mobj)` and back ✓; `reinterpret<Mobj?>(intptr(th) - typeinfo offsetof<thinker>(type<Mobj>))` ✓ | Doom's thinker pattern maps natively — no escape hatch needed. Converter emits das `struct` only, never `class` |
-| Bitfields via property operators (probed 2026-08-21, round 4) | `def operator . f(s)` / `def operator . f :=(var s; v)` give C-identical call sites incl. `s.a += 1` (compound routes through get+set); signed shl/sar sign-extend ✓; C truncation-on-write ✓; backing-unit layout C-exact ✓ | `[inline]` REJECTED on property operators — interp pays a call per bitfield access; JIT/AOT inline. `__`-prefixed names reserved (`_bits0`) |
+| Bitfields via property operators (probed 2026-08-21, round 4) | `def operator . f(s)` / `def operator . f :=(var s; v)` give C-identical call sites incl. `s.a += 1` (compound routes through get+set), except `s.a++`/`s.a--`: das rejects `++`/`--` on a property, so a step is spelled `s.a += 1` (F26); signed shl/sar sign-extend ✓; C truncation-on-write ✓; backing-unit layout C-exact ✓ under the MSVC ABI (under the Itanium ABI the unit width follows clang's bit offsets and the struct's das alignment can fall below clang's; F5) | `[inline]` REJECTED on property operators — interp pays a call per bitfield access; JIT/AOT inline. `__`-prefixed names reserved (`_bits0`) |
 
 All round-1 open probes have since been resolved ✓ (goto-over-declaration = C-exact;
 struct/fixed-array copy = plain `=`; multi-dim = C order; `intptr` = 8 bytes; computed
@@ -104,7 +108,14 @@ Known dumpers:
 - **Dumper A (das)**: `clang -Xclang -ast-dump=json` for bodies (verified 2026-08-21 on
   22.1.5: all castKinds present, bitfield widths, semantic-form initializers; ~5.8KB
   JSON/source line) + dasClangBind for layout (`clang_Type_getOffsetOf` /
-  `clang_getFieldDeclBitWidth`, header-verified) — a thin normalizing adapter.
+  `clang_getFieldDeclBitWidth`, header-verified) — a thin normalizing adapter. Three facts the
+  adapter had to absorb: the dumper runs the pinned `PATH_TO_LIBCLANG/bin/clang` with `-w`, not
+  the `clang` on PATH (an older one changes the producer, and `run_and_capture` merges stderr
+  into stdout, so one warning makes the dump unparsable JSON; F15); `-ast-dump=json` omits
+  `file` and `line` from a location that repeats the previous node's, so the dumper carries the
+  last seen ones forward (F16); and the dump writes an `OffsetOfExpr` with neither its
+  components nor its value, so `offsetof`'s type and field come from the macro's text at the
+  expansion site or from libclang's cursor (F20).
 - **Dumper B (Rust)**: the c2das (lookibed) C2Rust fork — its post-CBOR typed C AST is
   the most battle-tested C capture available (implicit casts + castKinds native, rav1d-
   class provenance); a C-IR serializer over it is a small module, preserving that
@@ -160,6 +171,15 @@ compile time on a very large generated module (Doom ≈ 40 kLOC C; `info.c` alon
 multi-thousand-line static table). Mitigations: split by SCC, move giant const tables into
 their own modules, measure compile time as part of P6 and only then optimize.
 
+The limit, probed (F76): two modules whose
+functions call each other must each `require` the other, daslang refuses the cycle
+(`error[20605]: circular dependency`), and a module cannot declare a function of a module it
+does not require (no forward declaration). The same two functions as `include`d fragments of
+one module run. The translator's default layout (ruling 2026-10-23) builds on that: one das module
+per C file, each cycle of C files one module of `.das.inc` fragments (`source`), with the
+cut edges late-bound instead under `source-cut`; the whole-program single module stays an
+opt-in.
+
 ### 4.4 Sidecar config
 
 Per-project `.c2das` file (das-literal or JSON): union policies (§5.3), cast-site marshal
@@ -188,9 +208,18 @@ demands) an aliasing byte-view accessor.
 ### 5.2 Function-pointer unions (`actionf_t`)
 
 Doom's action pointers pun between arities (`void(*)(mobj_t*)` vs `void(*)(player_t*,
-pspdef_t*)` vs think functions). Plan: a generated **dispatch shim** — a das variant over
+pspdef_t*)` vs think functions). First plan: a generated **dispatch shim** — a das variant over
 the concrete signature families plus wrapper functions; call sites through the union go
 through the shim. Sidecar lists the union groups (Doom has essentially one).
+
+Superseded by the probe (F32): no shim and no sidecar entry. A das function value is 8
+bytes and `reinterpret` between function types is lossless: invoking a function value through
+any function type calls the function with the arguments the call passes, under the interpreter
+and the JIT, as x86-64 C does. The member last stored says nothing about the function's own
+type: Doom stores `A_WeaponReady(player_t *, pspdef_t *)` through the one-parameter `acp1` and
+calls it through `acp2`, so a variant dispatching on the stored member would call it with one
+argument where C passes two; a variant of function values is also 16 bytes against C's 8. A
+function-pointer member is a `[c_union]` member like any other (§5.3).
 
 ### 5.3 Data unions — `[c_union]` annotation macro (revised 2026-08-21)
 
@@ -201,9 +230,15 @@ rewrites fields into one max-size/max-align `_storage` and synthesizes property 
 Punning is memcpy semantics by construction (C11-defined). Probed ✓ (2026-08-21): **one
 ref-returning operator per member** (`def operator . pt(var s : U) : Point&` via
 reinterpret of storage) covers read, write, compound assign, nested `u.member.field = x`,
-and addr-of — no get/set pairs needed. Feasibility of the macro itself: `[decs_template]`
-proves struct rewriting; remaining P0 probe — storage alignment (max-align member type, or
-`[align_as]` from §13). Perf: interp pays a property call per access — Lua's `TValue`
+and addr-of — no get/set pairs needed. Re-probed (F28): the `var`
+operator does not match a const base (a union read through a `let` parameter), so the macro
+adds a second, value-returning operator per member over a const union. Feasibility of the
+macro itself: `[decs_template]` proves struct rewriting. Storage alignment, the former P0 probe,
+is settled (F27): `_storage` is `U[k]`, `U` the unsigned type of the
+alignment; `apply` runs before inference, so where the member types cannot give the size and
+alignment there (a struct declared later, an enum-constant dimension, clang's alignment above
+the members' das alignment) the converter states them, `[c_union(size = 4, align = 4)]`; past
+align 8 no unsigned type aligns. Perf: interp pays a property call per access — Lua's `TValue`
 union is the hot case (JIT/AOT inline). Approved by Boris 2026-08-21.
 
 ### 5.4 Bitfields — `[c_bitfields(f = width, ...)]` annotation macro
@@ -236,8 +271,11 @@ end-to-end; normative code in lowering-examples.md): **the `[variadic]` hybrid**
 tuple is the type-safe call ABI (`sum(4, (10, 2.5, 20, 0.5))`); a generated `apply`
 prologue converts it once into a `CVaList` (3-arm variant, va-promotion decided by
 folding bool typeinfo traits); the converted C body stays *mechanical* — `va_arg` is a
-cursor pop, `va_copy` an array+cursor copy, forwarding passes the CVaList — no
-restructuring of C consumption loops.
+cursor pop — no restructuring of C consumption loops. As built (F35, F36): a C `va_list` is a `CVaCursor { list : CVaList const?;
+at : int }`, since it travels (a callee's pops advance the caller's list) and a bare `int`
+cursor cannot cross a call; `va_start` is `v = va_begin(va)`, `va_copy` is plain assignment of
+the cursor (the list is never written, so it is not copied), and forwarding passes
+`va_rest(ap)`, the arguments from the cursor on, never the function's whole list.
 printf keeps a constant-format fast path in the same macro; rendering binds CRT
 `snprintf` per directive (bind-first strategy, stdlib-examples.md) — byte-exact, no
 hand-written conversion engine; `c_vprintf` is the same splitter at runtime. Packaging
@@ -250,21 +288,31 @@ families.
 
 ## 6. Converter optimization tier (the "cleaner port" pass)
 
-Sidecar-gated, applied only after demo-sync is green — every optimization trades checks or
-shape for speed while preserving semantics of *correct* programs, so correctness is proven
-first, then the tier switches on. The list is a living discussion with Boris; seeded with
-the obvious ones (all spellings repo-verified 2026-08-21):
+Ruling 2026-11-01 (13), F66: O1 and the trailing increment are the converter's default, not part of
+the gated tier. A canonical counting loop (`for (i = a; i < n; ++i)` with `i` unwritten in the
+body and `n` invariant) is a das range loop, `for (i in range(a, n))`, which unlocks das's
+automatic bound-check elision (`src/ast/ast_bound_check_elision.cpp` proves range-bounded indices
+with no annotation) and is the idiomatic spelling; a `for` body without a `continue` takes its
+increment last, `while (cond) { body; inc }`; the exact eligibility and the remaining shapes are
+"General for" in `lowering-examples.md`. The option `--loops while` (the sidecar's
+`"loops": "while"`) turns the range form off for a program.
+
+The rest of the tier is sidecar-gated, applied only after demo-sync is green — every optimization
+trades checks or shape for speed while preserving semantics of *correct* programs, so correctness
+is proven first, then the tier switches on. The list is a living discussion with Boris; seeded with
+the obvious ones (all spellings repo-verified 2026-08-21); O1 stays in the table as the reference
+point the others build on:
 
 | # | Optimization | Mechanism |
 |---|---|---|
-| O1 | Canonical counting loop → das native range loop: `for (i=0; i<n; i++) { a[i]=b; }` ⇒ `for (i in range(n)) { a[i] = b }` when `i` is unmodified in the body and `n` loop-invariant | Unlocks das's **automatic bound-check elision** (`src/ast/ast_bound_check_elision.cpp` proves range-bounded indices with no annotation) plus the interpreter's fused loop fast path |
-| O2 | `[unsafe_deref]` on functions | Existing das function annotation — drops null-deref checks (interp + JIT honor it) |
-| O3 | `[hint(unsafe_range_check)]` on functions where O1's provable form doesn't apply (pointer-indexed renderer inner loops) | Existing hint honored by both the interp elision pass and the JIT |
+| O1 | (default since ruling (13)) Canonical counting loop → das native range loop: `for (i=0; i<n; i++) { a[i]=b; }` ⇒ `for (i in range(n)) { a[i] = b }` when `i` is unmodified in the body and `n` loop-invariant | Unlocks das's **automatic bound-check elision** (`src/ast/ast_bound_check_elision.cpp` proves range-bounded indices with no annotation) plus the interpreter's fused loop fast path |
+| O2 | `[unsafe_deref]` on functions | Existing das function annotation — drops null-deref checks (interp + JIT honor it). Probed (F84): a null `*p` under it is SIGSEGV on every tier, the process dead with exit code 139, no panic and no `recover`, where the checked function panics |
+| O3 | `[hint(unsafe_range_check)]` on functions where O1's provable form doesn't apply (pointer-indexed renderer inner loops) | Existing hint honored by both the interp elision pass and the JIT (and the exe); the AOT host keeps the range check all the same (`daslib/aot_cpp.das` spells `das_index::at`, which checks, and reads no hint). Probed (F84): under the interpreter, the JIT and the exe `s.a[4]` on an `int[4]` silently reads the next field. The translator puts O2 and O3 on every converted function under `--checks off` (the sidecar's `checks: "off"`), never by default |
 | O4 | Pointer-walk → index rewrite (`while (*p) p++` family) where the base and bound are recoverable | Feeds O1/elision; where not provable, stays pointer form under O3 |
 | O5 | Byte-fill / byte-copy loop recognition → `memset` / `memcpy` builtins | Doom's renderer has several |
 | O6 | Dense no-fallthrough switch → computed-`goto` jump table (bounds guard + `goto base + x`) | The matched-flag loop is the semantic default; O6 exists for hot dense dispatch (Lua VM: ~85 cases per instruction) |
 
-Expectation (Boris, 2026-08-21): O1–O3 alone likely reach the 35 fps interp bar.
+Expectation (Boris, 2026-08-21): O1–O3 alone likely reach the 35 fps interp bar. (O1 is now the default; O2 and O3 stay gated until demo sync.)
 
 ## 7. c_runtime module (the libc subset)
 
