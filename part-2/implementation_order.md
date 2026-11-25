@@ -53,20 +53,48 @@ Owned by the implementer. Each lands before the item that needs it.
 **Goal: one header set and one predefined-macro table, seen by both dumpers.**
 
 - **H.1 The header set.** `frontend/include/` with the headers of the plan. Each declares
-  what `crt` binds, under the same names.
-  Acceptance: a test lists the functions `crt` exports and the prototypes the headers
-  declare; the two lists are equal.
+  what a converted program can call, under the same names: the functions `crt` binds
+  under their C names, and the libc names the emitter lowers itself (`printf`, `exit`,
+  `qsort`, `sin`, `longjmp`, `signal`: the `C_RUNTIME_CALLS` table of `emit.das`).
+  `assert` and `errno` expand to calls of `__assert_fail` and `__errno_location`, the
+  names the emitter already maps (rule 2).
+  Acceptance: a test reads the functions `crt` exports from the live module, the names
+  the emitter lowers, and the prototypes the headers declare. The prototypes equal the
+  first two lists together. The `crt` exports with no C prototype (the `c_*` helpers,
+  the per-directive `snprintf_*`, `sscanf_*` and `fscanf_*` families) and glibc's alias
+  spellings are a short list of exceptions in the test, each with its reason.
+  Probed 2026-11-26: the plain equality of the two lists cannot hold, `crt` exports
+  helpers C does not name and binds no `printf`.
 - **H.2 The predefined macros.** One table per dialect (`linux`, `msvc`): the platform
-  names, the sizes, `__STDC_VERSION__`. The table is a file both dumpers read. **(P)**
+  names, the sizes, `__STDC_VERSION__`. The table is a file both dumpers read, and it
+  states the dialect once: gnu17, clang's default, with `__STDC_VERSION__` `201710L`.
+  That is what Part 1 ran; the "C99" of the plan's decision table names the grammar the
+  inputs use, not the value of this macro. **(P)**
   Dumper A runs clang with `-undef` plus the table as `-D` entries, so clang's own
-  predefined names (`__GNUC__`, `__clang__`) are gone and both dumpers preprocess the
-  same input.
+  predefined names (`__GNUC__`, `__clang__`, `_MSC_VER`) are gone and both dumpers
+  preprocess the same input.
+  Probed 2026-11-26 (clang 22.1.8): `-undef` takes the predefined macros from 408 to 8.
+  The standard ones stay: `__STDC__` (under the linux triple only), `__STDC_HOSTED__`,
+  `__STDC_VERSION__`, `__STDC_UTF_16__`, `__STDC_UTF_32__` and the three `__STDC_EMBED_*`.
+  The table states them too, and a `-D` over one works. `__STDC_VERSION__` is `201710L`:
+  Dumper A passes no `-std`, so Part 1 ran clang's default, gnu17. The built-in names
+  that are no table entries (`__FILE__`, `__LINE__`, `__COUNTER__`, `__has_include`,
+  `__has_attribute`) stay as well; Dumper C's preprocessor implements or refuses each
+  (PP.3, PP.4). The dialect file lists the queries a real input uses, each answered as
+  clang answers it: `__has_include`, `__has_extension` and `__has_feature` (sqlite3
+  picks its atomics by them), `__FILE_NAME__`.
 - **H.3 Dumper A on the own headers.** `-nostdinc` plus `frontend/include/`; the folder
   counts as external, as the system directories do today. Then delete the glibc special
   cases (`__NO_CTYPE`, the statement-expression `assert`).
   Acceptance: every suite keeps its pass list; every project passes its own check
   (demo-sync, the Lua suite, the project outputs). c2das-ports is regenerated and the
-  text diff is reviewed once.
+  text diff is reviewed once. The ports pull request carries what the review reads:
+  - a table with one row per port: the count of changed lines, split by reason class
+    (the `assert` shape, a predefined name the table no longer gives, a header
+    declaration, any other, each other one explained);
+  - the Doom demo hashes and the Lua suite result, unchanged;
+  - the interpreter and JIT numbers of the ports, before and after, from one
+    `heavy --exclusive` run, unchanged within the run's noise.
 
 ## Preprocessor {#preprocessor}
 
@@ -76,29 +104,63 @@ Owned by the implementer. Each lands before the item that needs it.
   and a column.
 - **PP.2 Directives and includes.** `#include` through one file-provider interface (the
   first provider reads with `fio`), include dirs in order, `#pragma once`, include
-  guards, `#line`, `#error`, `#pragma pack` recorded for the layout.
-- **PP.3 Macro expansion.** Object-like, function-like, variadic, `#`, `##`, rescanning
-  with hide sets, `__FILE__`, `__LINE__`. The definitions of H.2 and of the import's
+  guards, `#line`, `#error`, `#pragma pack` recorded for the layout. `#warning` is
+  accepted. Any other `#pragma` (PureDOOM has three units with `#pragma warning`) passes
+  through to the C-IR's ledger or is dropped by a listed rule, never silently.
+- **PP.3 Macro expansion.** Object-like, function-like, variadic, `#`, `##`,
+  `__FILE__`, `__LINE__`. Rescanning follows clang's and gcc's model: a macro is disabled
+  while its own replacement is rescanned, and a name read in that time is painted for
+  good. Not Prosser's per-token hide sets: probed on chibicc's preprocessor, they differ
+  from both compilers on deferred recursion (`EXPAND(REPEAT(1))` gives `1 REPEAT(1)`
+  where clang and gcc give `1 1 REPEAT_INDIRECT ()(1)`), break map-macro, Cloak and
+  metalang99, and grow without bound on Boost.PP (3.5 to 4.8 GB, then killed). The definitions of H.2 and of the import's
   `defines` are set before the first line.
-- **PP.4 `#if`.** The expression evaluator, `defined`, `#elif`, nesting.
+- **PP.4 `#if`.** The expression evaluator, `defined`, `#elif`, nesting. Arithmetic is in
+  `intmax_t` and `uintmax_t` by C11 6.10.1p4. The known trap is a test of this item: the
+  sign of a converted operand, `L'\0' - 1 > 0` in glibc's `bits/wchar.h` (all 103
+  mismatches of chibicc's evaluator over 40961 real `#if` expressions had this cause).
 - **PP.5 The expansion record.** Every token keeps its spelling location, its expansion
   location and the macro call it came from, with the call's argument text. The Core and
   Aggregates phases write the C-IR's macro fields from it.
 - **PP.6 Token oracle.** Run `clang -E` under H.2's flags, lex its output with PP.1,
-  compare token by token.
-  Acceptance: clean on every suite file and every unit of every project.
+  compare token by token. `gcc -E` under the same flags is the second reference: where
+  clang and gcc disagree the unit is implementation-defined and listed, not failed
+  (probed: they disagree on 34 units). The runner is committed in c2das-re and runs in
+  CI. Its corpus is every suite file, every unit of every project, and the inputs that
+  load a preprocessor, which compiler suites and real programs barely do (a planted
+  hide-set error was caught by three mcpp tests alone): mcpp's `n.*`, `e.*` and `u.*`,
+  `gcc.dg/cpp`, tcc's preprocessor tests, the examples of C11 6.10.3.5, the hide-set
+  tests and ten macro libraries. 2289 units, already collected.
+  Acceptance: clean on every suite file and every unit of every project; on the rest,
+  equal to clang, or listed as implementation-defined with gcc's answer beside it.
 - **PP.7 Speed probe.** Preprocess PureDOOM under the interpreter natively and under the
-  wasm interpreter. Record tokens per second in the ledger. The owner sets the bar from
-  that number.
+  wasm interpreter. Record tokens per second in the ledger. Record also the frontend's
+  own load and compile time, cold and warm, in the browser: the user waits for the start
+  and the parse together (a converted chibicc, 9.5 thousand das lines, starts cold in
+  wasm in 12.4 to 13 s on every load, 4.77 s of it compiling das). The owner sets the
+  bar from these numbers.
 
 ## Core {#core}
 
 **Goal: byte-identical C-IR for scalar programs.**
 
+- **C.0 Conversions census.** A probe, with no change of the emitter: from Dumper A's
+  C-IR over every suite and every port, a histogram of the cast nodes by `castKind`, and
+  the list of the distinct C.3 rules the inputs really hit. C.3 is then written against
+  that list, most frequent rule first, and a rule no input hits is marked so.
 - **C.1 Parser.** Expressions, declarations and declarators, statements, with the typedef
-  table. Scalars, pointers and functions only. Recursive descent, or `modules/dasLR1`
-  grown into a bison-like generator (the plan's note under Dumper C): the implementer's
-  choice. If dasLR1, its extension is a pull request against daslang and lands first.
+  table. Scalars, pointers and functions only. Two candidates: recursive descent, or a
+  grammar for dasBison (`modules/dasLR1` grown into a bison-like generator, the plan's
+  note under Dumper C). **(P)** The choice is decided by a probe of both on the same
+  input, five preprocessed files and the c-testsuite:
+  - each builds the C.1 AST with source locations, and keeps the GNU attributes, asm
+    labels and statement expressions as nodes, with no filtering before the parser;
+  - tokens per millisecond with the tree built, under the interpreter and the JIT;
+  - the count of grammar hacks (the typedef feedback, the GNU forms) against the count
+    of hand-written lines.
+  The probe's report also writes down the cost of not taking dasBison: it stays without
+  a first real user. If dasBison is taken, its extension is a pull request against
+  daslang and lands first.
 - **C.2 Types.** The type table in the spec's interning order, each `spell` as clang
   spells it.
 - **C.3 Conversions.** Promotions, usual arithmetic conversions, lvalue conversion,
@@ -181,7 +243,9 @@ Owned by the implementer. Each lands before the item that needs it.
   Acceptance: the plan's cache probe, on a real import: an edited header recompiles, an
   untouched one stays warm.
 - **I.5 The surface.** External linkage is public, file statics are private. A prototype
-  with no body binds to `crt` by name, else an error naming it. A C `main` is exported as
+  with no body binds by name to `crt`, or is a libc name the emitter lowers itself
+  (`printf`, `exit`, `qsort`: the names H.1's headers declare); any other is an error
+  naming it. A C `main` is exported as
   `c_main`, so it never meets a das `main`.
 - **I.6 Errors.** A frontend error reaches the user through `macro_error`, with the C
   file, line and column in its text.

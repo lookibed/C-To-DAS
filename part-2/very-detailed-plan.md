@@ -122,8 +122,9 @@ Part 2 keeps all of this. Dumper C only has to report the same offsets clang rep
 Four parts. Each one owns a list of C-IR obligations.
 
 **Preprocessor.** Line splicing, pp-tokens, `#include` through the include path,
-object-like and function-like macros, variadic macros, `#` and `##`, rescanning with hide
-sets, `#if` expressions with `defined`, `#pragma once`, `#line`, `#error`, the predefined
+object-like and function-like macros, variadic macros, `#` and `##`, rescanning by
+clang's and gcc's model (a macro is disabled while its replacement is rescanned; not
+Prosser's per-token hide sets), `#if` expressions with `defined`, `#pragma once`, `#line`, `#error`, the predefined
 macros of the dialect. Every token keeps its spelling location, its expansion location
 and the macro it came from. That record gives the C-IR's macro fields directly; Dumper A
 has to rebuild them from clang's dump by matching offsets.
@@ -182,14 +183,16 @@ Rules for all four parts:
 One folder of headers: `stdio.h`, `stdlib.h`, `string.h`, `math.h`, `ctype.h`,
 `stdint.h`, `stddef.h`, `stdarg.h`, `stdbool.h`, `limits.h`, `float.h`, `errno.h`,
 `time.h`, `setjmp.h`, `assert.h`, `signal.h`, `locale.h`, `inttypes.h`. They declare what
-the `crt` module binds, under the names it binds, and nothing else. The list grows on
-suite demand, as `c_runtime` did.
+a converted program can call, under the same names, and nothing else: what the `crt`
+module binds under its C names, and the libc names the emitter lowers itself (`printf`,
+`exit`, `qsort`). The list grows on suite demand, as `c_runtime` did.
 
 - A `<...>` include resolves to this folder only. An include it does not hold is an error
   that names the header.
 - `FILE` is opaque. `struct tm` and `struct lconv` are written out. `jmp_buf` and
   `va_list` are the two opaque records Part 1 already defines.
-- `assert` and `errno` are plain calls. The glibc-shaped special cases of Dumper A
+- `assert` and `errno` are plain calls, of `__assert_fail` and `__errno_location`, the
+  names the emitter maps. The glibc-shaped special cases of Dumper A
   (`__NO_CTYPE`, the statement-expression `assert`) are not needed.
 - **Dumper A runs on the same headers** (`-nostdinc` plus this folder). Both dumpers then
   see one input, and clang checks our headers for free.
@@ -210,8 +213,9 @@ the compiler parses that text in place. `daslib/spoof.das` works this way today.
   linkage are public under their C names, file statics are private, structs, enums,
   typedefs and constant macros are visible. A function-like macro is a `[c_macro]`
   function where Part 1's fold accepts it.
-- A prototype with no body in the listed files binds to `crt` by name. A name `crt` does
-  not have is an error that names the symbol.
+- A prototype with no body in the listed files binds to `crt` by name, or is a libc name
+  the emitter lowers itself (`printf`, `exit`, `qsort`), as the own headers declare. Any
+  other name is an error that names the symbol.
 - Probed 2026-11-20 (`probes/`): a macro that stands right after the wrapper's own
   `require` lines splices `require` lines, a struct and a function; the wrapper's later
   functions call the spliced one, and a module that requires the wrapper sees all of it.
