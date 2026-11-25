@@ -198,7 +198,9 @@ Owned by the implementer. Each lands before the item that needs it.
   Acceptance: the plan's cache probe, on a real import: an edited header recompiles, an
   untouched one stays warm.
 - **I.5 The surface.** External linkage is public, file statics are private. A prototype
-  with no body binds to `crt` by name, else an error naming it. A C `main` is exported as
+  with no body binds by name to `crt`, or is a libc name the emitter lowers itself
+  (`printf`, `exit`, `qsort`: the names H.1's headers declare); any other is an error
+  naming it. A C `main` is exported as
   `c_main`, so it never meets a das `main`.
 - **I.6 Errors.** A frontend error reaches the user through `macro_error`, with the C
   file, line and column in its text.

@@ -212,8 +212,9 @@ the compiler parses that text in place. `daslib/spoof.das` works this way today.
   linkage are public under their C names, file statics are private, structs, enums,
   typedefs and constant macros are visible. A function-like macro is a `[c_macro]`
   function where Part 1's fold accepts it.
-- A prototype with no body in the listed files binds to `crt` by name. A name `crt` does
-  not have is an error that names the symbol.
+- A prototype with no body in the listed files binds to `crt` by name, or is a libc name
+  the emitter lowers itself (`printf`, `exit`, `qsort`), as the own headers declare. Any
+  other name is an error that names the symbol.
 - Probed 2026-11-20 (`probes/`): a macro that stands right after the wrapper's own
   `require` lines splices `require` lines, a struct and a function; the wrapper's later
   functions call the spliced one, and a module that requires the wrapper sees all of it.
