@@ -182,14 +182,16 @@ Rules for all four parts:
 One folder of headers: `stdio.h`, `stdlib.h`, `string.h`, `math.h`, `ctype.h`,
 `stdint.h`, `stddef.h`, `stdarg.h`, `stdbool.h`, `limits.h`, `float.h`, `errno.h`,
 `time.h`, `setjmp.h`, `assert.h`, `signal.h`, `locale.h`, `inttypes.h`. They declare what
-the `crt` module binds, under the names it binds, and nothing else. The list grows on
-suite demand, as `c_runtime` did.
+a converted program can call, under the same names, and nothing else: what the `crt`
+module binds under its C names, and the libc names the emitter lowers itself (`printf`,
+`exit`, `qsort`). The list grows on suite demand, as `c_runtime` did.
 
 - A `<...>` include resolves to this folder only. An include it does not hold is an error
   that names the header.
 - `FILE` is opaque. `struct tm` and `struct lconv` are written out. `jmp_buf` and
   `va_list` are the two opaque records Part 1 already defines.
-- `assert` and `errno` are plain calls. The glibc-shaped special cases of Dumper A
+- `assert` and `errno` are plain calls, of `__assert_fail` and `__errno_location`, the
+  names the emitter maps. The glibc-shaped special cases of Dumper A
   (`__NO_CTYPE`, the statement-expression `assert`) are not needed.
 - **Dumper A runs on the same headers** (`-nostdinc` plus this folder). Both dumpers then
   see one input, and clang checks our headers for free.

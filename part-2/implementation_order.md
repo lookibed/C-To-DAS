@@ -53,14 +53,31 @@ Owned by the implementer. Each lands before the item that needs it.
 **Goal: one header set and one predefined-macro table, seen by both dumpers.**
 
 - **H.1 The header set.** `frontend/include/` with the headers of the plan. Each declares
-  what `crt` binds, under the same names.
-  Acceptance: a test lists the functions `crt` exports and the prototypes the headers
-  declare; the two lists are equal.
+  what a converted program can call, under the same names: the functions `crt` binds
+  under their C names, and the libc names the emitter lowers itself (`printf`, `exit`,
+  `qsort`, `sin`, `longjmp`, `signal`: the `C_RUNTIME_CALLS` table of `emit.das`).
+  `assert` and `errno` expand to calls of `__assert_fail` and `__errno_location`, the
+  names the emitter already maps (rule 2).
+  Acceptance: a test reads the functions `crt` exports from the live module, the names
+  the emitter lowers, and the prototypes the headers declare. The prototypes equal the
+  first two lists together. The `crt` exports with no C prototype (the `c_*` helpers,
+  the per-directive `snprintf_*`, `sscanf_*` and `fscanf_*` families) and glibc's alias
+  spellings are a short list of exceptions in the test, each with its reason.
+  Probed 2026-11-26: the plain equality of the two lists cannot hold, `crt` exports
+  helpers C does not name and binds no `printf`.
 - **H.2 The predefined macros.** One table per dialect (`linux`, `msvc`): the platform
   names, the sizes, `__STDC_VERSION__`. The table is a file both dumpers read. **(P)**
   Dumper A runs clang with `-undef` plus the table as `-D` entries, so clang's own
-  predefined names (`__GNUC__`, `__clang__`) are gone and both dumpers preprocess the
-  same input.
+  predefined names (`__GNUC__`, `__clang__`, `_MSC_VER`) are gone and both dumpers
+  preprocess the same input.
+  Probed 2026-11-26 (clang 22.1.8): `-undef` takes the predefined macros from 408 to 8.
+  The standard ones stay: `__STDC__` (under the linux triple only), `__STDC_HOSTED__`,
+  `__STDC_VERSION__`, `__STDC_UTF_16__`, `__STDC_UTF_32__` and the three `__STDC_EMBED_*`.
+  The table states them too, and a `-D` over one works. `__STDC_VERSION__` is `201710L`:
+  Dumper A passes no `-std`, so Part 1 ran clang's default, gnu17. The built-in names
+  that are no table entries (`__FILE__`, `__LINE__`, `__COUNTER__`, `__has_include`,
+  `__has_attribute`) stay as well; Dumper C's preprocessor implements or refuses each
+  (PP.3, PP.4).
 - **H.3 Dumper A on the own headers.** `-nostdinc` plus `frontend/include/`; the folder
   counts as external, as the system directories do today. Then delete the glibc special
   cases (`__NO_CTYPE`, the statement-expression `assert`).
