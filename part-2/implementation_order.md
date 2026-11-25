@@ -66,7 +66,10 @@ Owned by the implementer. Each lands before the item that needs it.
   Probed 2026-11-26: the plain equality of the two lists cannot hold, `crt` exports
   helpers C does not name and binds no `printf`.
 - **H.2 The predefined macros.** One table per dialect (`linux`, `msvc`): the platform
-  names, the sizes, `__STDC_VERSION__`. The table is a file both dumpers read. **(P)**
+  names, the sizes, `__STDC_VERSION__`. The table is a file both dumpers read, and it
+  states the dialect once: gnu17, clang's default, with `__STDC_VERSION__` `201710L`.
+  That is what Part 1 ran; the "C99" of the plan's decision table names the grammar the
+  inputs use, not the value of this macro. **(P)**
   Dumper A runs clang with `-undef` plus the table as `-D` entries, so clang's own
   predefined names (`__GNUC__`, `__clang__`, `_MSC_VER`) are gone and both dumpers
   preprocess the same input.
@@ -83,7 +86,13 @@ Owned by the implementer. Each lands before the item that needs it.
   cases (`__NO_CTYPE`, the statement-expression `assert`).
   Acceptance: every suite keeps its pass list; every project passes its own check
   (demo-sync, the Lua suite, the project outputs). c2das-ports is regenerated and the
-  text diff is reviewed once.
+  text diff is reviewed once. The ports pull request carries what the review reads:
+  - a table with one row per port: the count of changed lines, split by reason class
+    (the `assert` shape, a predefined name the table no longer gives, a header
+    declaration, any other, each other one explained);
+  - the Doom demo hashes and the Lua suite result, unchanged;
+  - the interpreter and JIT numbers of the ports, before and after, from one
+    `heavy --exclusive` run, unchanged within the run's noise.
 
 ## Preprocessor {#preprocessor}
 
@@ -112,10 +121,23 @@ Owned by the implementer. Each lands before the item that needs it.
 
 **Goal: byte-identical C-IR for scalar programs.**
 
+- **C.0 Conversions census.** A probe, with no change of the emitter: from Dumper A's
+  C-IR over every suite and every port, a histogram of the cast nodes by `castKind`, and
+  the list of the distinct C.3 rules the inputs really hit. C.3 is then written against
+  that list, most frequent rule first, and a rule no input hits is marked so.
 - **C.1 Parser.** Expressions, declarations and declarators, statements, with the typedef
-  table. Scalars, pointers and functions only. Recursive descent, or `modules/dasLR1`
-  grown into a bison-like generator (the plan's note under Dumper C): the implementer's
-  choice. If dasLR1, its extension is a pull request against daslang and lands first.
+  table. Scalars, pointers and functions only. Two candidates: recursive descent, or a
+  grammar for dasBison (`modules/dasLR1` grown into a bison-like generator, the plan's
+  note under Dumper C). **(P)** The choice is decided by a probe of both on the same
+  input, five preprocessed files and the c-testsuite:
+  - each builds the C.1 AST with source locations, and keeps the GNU attributes, asm
+    labels and statement expressions as nodes, with no filtering before the parser;
+  - tokens per millisecond with the tree built, under the interpreter and the JIT;
+  - the count of grammar hacks (the typedef feedback, the GNU forms) against the count
+    of hand-written lines.
+  The probe's report also writes down the cost of not taking dasBison: it stays without
+  a first real user. If dasBison is taken, its extension is a pull request against
+  daslang and lands first.
 - **C.2 Types.** The type table in the spec's interning order, each `spell` as clang
   spells it.
 - **C.3 Conversions.** Promotions, usual arithmetic conversions, lvalue conversion,
