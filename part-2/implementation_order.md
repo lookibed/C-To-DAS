@@ -80,7 +80,9 @@ Owned by the implementer. Each lands before the item that needs it.
   Dumper A passes no `-std`, so Part 1 ran clang's default, gnu17. The built-in names
   that are no table entries (`__FILE__`, `__LINE__`, `__COUNTER__`, `__has_include`,
   `__has_attribute`) stay as well; Dumper C's preprocessor implements or refuses each
-  (PP.3, PP.4).
+  (PP.3, PP.4). The dialect file lists the queries a real input uses, each answered as
+  clang answers it: `__has_include`, `__has_extension` and `__has_feature` (sqlite3
+  picks its atomics by them), `__FILE_NAME__`.
 - **H.3 Dumper A on the own headers.** `-nostdinc` plus `frontend/include/`; the folder
   counts as external, as the system directories do today. Then delete the glibc special
   cases (`__NO_CTYPE`, the statement-expression `assert`).
@@ -102,20 +104,41 @@ Owned by the implementer. Each lands before the item that needs it.
   and a column.
 - **PP.2 Directives and includes.** `#include` through one file-provider interface (the
   first provider reads with `fio`), include dirs in order, `#pragma once`, include
-  guards, `#line`, `#error`, `#pragma pack` recorded for the layout.
-- **PP.3 Macro expansion.** Object-like, function-like, variadic, `#`, `##`, rescanning
-  with hide sets, `__FILE__`, `__LINE__`. The definitions of H.2 and of the import's
+  guards, `#line`, `#error`, `#pragma pack` recorded for the layout. `#warning` is
+  accepted. Any other `#pragma` (PureDOOM has three units with `#pragma warning`) passes
+  through to the C-IR's ledger or is dropped by a listed rule, never silently.
+- **PP.3 Macro expansion.** Object-like, function-like, variadic, `#`, `##`,
+  `__FILE__`, `__LINE__`. Rescanning follows clang's and gcc's model: a macro is disabled
+  while its own replacement is rescanned, and a name read in that time is painted for
+  good. Not Prosser's per-token hide sets: probed on chibicc's preprocessor, they differ
+  from both compilers on deferred recursion (`EXPAND(REPEAT(1))` gives `1 REPEAT(1)`
+  where clang and gcc give `1 1 REPEAT_INDIRECT ()(1)`), break map-macro, Cloak and
+  metalang99, and grow without bound on Boost.PP (3.5 to 4.8 GB, then killed). The definitions of H.2 and of the import's
   `defines` are set before the first line.
-- **PP.4 `#if`.** The expression evaluator, `defined`, `#elif`, nesting.
+- **PP.4 `#if`.** The expression evaluator, `defined`, `#elif`, nesting. Arithmetic is in
+  `intmax_t` and `uintmax_t` by C11 6.10.1p4. The known trap is a test of this item: the
+  sign of a converted operand, `L'\0' - 1 > 0` in glibc's `bits/wchar.h` (all 103
+  mismatches of chibicc's evaluator over 40961 real `#if` expressions had this cause).
 - **PP.5 The expansion record.** Every token keeps its spelling location, its expansion
   location and the macro call it came from, with the call's argument text. The Core and
   Aggregates phases write the C-IR's macro fields from it.
 - **PP.6 Token oracle.** Run `clang -E` under H.2's flags, lex its output with PP.1,
-  compare token by token.
-  Acceptance: clean on every suite file and every unit of every project.
+  compare token by token. `gcc -E` under the same flags is the second reference: where
+  clang and gcc disagree the unit is implementation-defined and listed, not failed
+  (probed: they disagree on 34 units). The runner is committed in c2das-re and runs in
+  CI. Its corpus is every suite file, every unit of every project, and the inputs that
+  load a preprocessor, which compiler suites and real programs barely do (a planted
+  hide-set error was caught by three mcpp tests alone): mcpp's `n.*`, `e.*` and `u.*`,
+  `gcc.dg/cpp`, tcc's preprocessor tests, the examples of C11 6.10.3.5, the hide-set
+  tests and ten macro libraries. 2289 units, already collected.
+  Acceptance: clean on every suite file and every unit of every project; on the rest,
+  equal to clang, or listed as implementation-defined with gcc's answer beside it.
 - **PP.7 Speed probe.** Preprocess PureDOOM under the interpreter natively and under the
-  wasm interpreter. Record tokens per second in the ledger. The owner sets the bar from
-  that number.
+  wasm interpreter. Record tokens per second in the ledger. Record also the frontend's
+  own load and compile time, cold and warm, in the browser: the user waits for the start
+  and the parse together (a converted chibicc, 9.5 thousand das lines, starts cold in
+  wasm in 12.4 to 13 s on every load, 4.77 s of it compiling das). The owner sets the
+  bar from these numbers.
 
 ## Core {#core}
 

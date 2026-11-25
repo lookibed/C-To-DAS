@@ -122,8 +122,9 @@ Part 2 keeps all of this. Dumper C only has to report the same offsets clang rep
 Four parts. Each one owns a list of C-IR obligations.
 
 **Preprocessor.** Line splicing, pp-tokens, `#include` through the include path,
-object-like and function-like macros, variadic macros, `#` and `##`, rescanning with hide
-sets, `#if` expressions with `defined`, `#pragma once`, `#line`, `#error`, the predefined
+object-like and function-like macros, variadic macros, `#` and `##`, rescanning by
+clang's and gcc's model (a macro is disabled while its replacement is rescanned; not
+Prosser's per-token hide sets), `#if` expressions with `defined`, `#pragma once`, `#line`, `#error`, the predefined
 macros of the dialect. Every token keeps its spelling location, its expansion location
 and the macro it came from. That record gives the C-IR's macro fields directly; Dumper A
 has to rebuild them from clang's dump by matching offsets.
