@@ -73,6 +73,14 @@ Owned by the implementer. Each lands before the item that needs it.
   Acceptance: a test holds each table to clang: every name clang predefines under the
   dialect's triple is in the table with clang's value, or in a listed class the table
   leaves out (the compiler's identity, code generation, CPU features).
+  The `linux` table defines the GNU triple as clang does: `__GNUC__` 4, `__GNUC_MINOR__`
+  2, `__GNUC_PATCHLEVEL__` 1. It does not define `__clang__`. The dialect is GNU already
+  (gnu17, the builtins, the attributes, case ranges), Part 1's ports were accepted on
+  their GNU arms, and a program that hides `__attribute__((packed))` behind `__GNUC__`
+  must not change its meaning without an error: probed 2026-11-26, without the triple
+  13 records of doomgeneric lose `packed`. The compiler's identity that stays out is
+  `__clang__`, `__llvm__`, `__VERSION__` and the like. The `msvc` table defines no
+  `_MSC_VER` for now; the same question is PR.2's.
   Dumper A's switch to the table is H.3's, not this item's.
   Probed 2026-11-26 (clang 22.1.8): `-undef` takes the predefined macros from 408 to 8.
   The standard ones stay: `__STDC__` (under the linux triple only), `__STDC_HOSTED__`,
@@ -87,15 +95,19 @@ Owned by the implementer. Each lands before the item that needs it.
 - **H.3 Dumper A on the own headers.** `-nostdinc` plus `frontend/include/`; the folder
   counts as external, as the system directories do today. In the same change Dumper A
   runs clang with `-undef` plus H.2's table as `-D` entries, so clang's own predefined
-  names (`__GNUC__`, `__clang__`, `_MSC_VER`) are gone and both dumpers preprocess the
-  same input. The two land together: probed 2026-11-26, glibc under `-undef` is another
+  names (`__clang__`, `_MSC_VER`) are gone, the table's are in their place, and both
+  dumpers preprocess the same input. The two land together: probed 2026-11-26, glibc under `-undef` is another
   libc. Without `__GNUC__` its `<sys/cdefs.h>` defines `__attribute__` away, so a
   program's `packed` and `aligned` vanish and its layouts change with no error, and
   `fopen` and `sscanf` become `fopen64` and `__isoc99_sscanf`. Then delete the glibc special
   cases (`__NO_CTYPE`, the statement-expression `assert`).
   Acceptance: every suite keeps its pass list; every project passes its own check
-  (demo-sync, the Lua suite, the project outputs). c2das-ports is regenerated and the
-  text diff is reviewed once. The ports pull request carries what the review reads:
+  (demo-sync, the Lua suite, the project outputs). A layout guard stays for good: for
+  every record of a program, clang's layout under the table (size, alignment, every
+  offset, `packed`) equals its layout under clang's own predefined macros, and a
+  difference fails the dump with the record's name. No program loses a layout attribute
+  without an error. c2das-ports is regenerated and the text diff is reviewed once. The
+  ports pull request carries what the review reads:
   - a table with one row per port: the count of changed lines, split by reason class
     (the `assert` shape, a predefined name the table no longer gives, a header
     declaration, any other, each other one explained);
