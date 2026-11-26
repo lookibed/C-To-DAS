@@ -167,6 +167,8 @@ Owned by the implementer. Each lands before the item that needs it.
   C-IR over every suite and every port, a histogram of the cast nodes by `castKind`, and
   the list of the distinct C.3 rules the inputs really hit. C.3 is then written against
   that list, most frequent rule first, and a rule no input hits is marked so.
+  Run 2026-11-26 (`metrics/conversion_census.das` in c2das-re): 1813 units, 2,063,608 cast
+  nodes, csmith's programs 83% of them; 25 C rules hit, 16 of them covering 99% of the casts.
 - **C.1 Parser.** Expressions, declarations and declarators, statements, with the typedef
   table. Scalars, pointers and functions only. Two candidates: recursive descent, or a
   grammar for dasBison (`modules/dasLR1` grown into a bison-like generator, the plan's
@@ -180,11 +182,52 @@ Owned by the implementer. Each lands before the item that needs it.
   The probe's report also writes down the cost of not taking dasBison: it stays without
   a first real user. If dasBison is taken, its extension is a pull request against
   daslang and lands first.
+  Decided 2026-11-26 from the probe: recursive descent. On one token array and one tree
+  both candidates parse the five files and 218 of 219 c-testsuite units to byte-identical
+  trees; recursive descent is right on 19 of 19 typedef-scope cases against 16, and about
+  3 to 4 times faster under the interpreter and 1.5 to 2 times under the JIT (rough
+  numbers from shared-box runs; one exclusive run at the end of C.1 gives the number to
+  quote). C.1 consumes PP.1's tokens with their interned identifiers and copies no string
+  per token; its checks are dastest tests. The probe's grammar stays for dasBison as a
+  test of its own later, with the recursive-descent parser as its byte-identical oracle;
+  the seven gaps the probe met in dasBison are issues 3 to 9 of its repository.
 - **C.2 Types.** The type table in the spec's interning order, each `spell` as clang
   spells it.
-- **C.3 Conversions.** Promotions, usual arithmetic conversions, lvalue conversion,
-  decay, null pointer constants, assignment and argument conversions, each a cast node
-  with its pinned `castKind`.
+- **C.3 Conversions.** Every conversion clang writes as a cast node, with its pinned `castKind`,
+  implicit or explicit, on the node clang puts it on. C.0's census (`metrics/conversion_census.das`)
+  ranks the rules at two levels, the C rule and the C rule with its castKind; the work goes in its
+  order, the groups below by share of all casts (without csmith in brackets):
+  1. The 6.3.2.1 conversions, context-free: lvalue conversion (a record's too), array decay (a
+     string literal's too), function decay (every direct callee, `__builtin_*` ones spelled
+     `FunctionToPointerDecay` as Dumper A spells them): 44.65% (62.41%).
+  2. To the slot's own type: aggregate element and scalar initializers, assignment, prototyped
+     argument, return, and an argument of a call to a K&R definition, which clang converts to the
+     definition's parameter type although the callee type has no prototype (clang's rule, not
+     6.5.2.2p6): 38.44% (25.41%). A literal is converted, never retyped (`IntegralCast` over the
+     `int_lit`, 67% of all `IntegralCast`s). A qualifying `NoOp` (`char *` to `const char *`,
+     invisible in the C-IR's types) needs the qualifiers Dumper C's own types keep.
+  3. Null pointer constants: `NullToPointer`, nested over an explicit `(void*)0`; `BitCast` over it
+     where clang converts it as a pointer: 9.49% (2.04%).
+  4. To a type computed from the operands: integer promotions of binary, `&&`/`||`, shift (each
+     operand alone), unary and switch operands and of the `?:` condition, the usual arithmetic
+     conversions, the `?:` arms (6.5.15p5-6), the right operand of a compound assignment converted
+     to the computation type (the left operand and the result carry no node), the composite pointer
+     type of a comparison: 5.78% (5.93%). clang writes one cast for a promotion and the conversion
+     after it; a bit-field narrower than `int` promotes to `int`.
+  5. Explicit casts other than `(void*)0`: the castKind from the operand and target types, `NoOp`
+     for a cast to the same type: 1.63% (4.17%).
+  6. Default argument promotions of variadic arguments: 95 casts. A call without a prototype
+     needs none in the inputs; Dumper C records "has a prototype" and a K&R definition's parameter
+     types itself, since the C-IR spells `T ()` as `T (void)`.
+  Never hit by any input, and so written last, each behind a probe of its own: `PointerToBoolean`,
+  `FloatingToBoolean`, `BooleanToSignedIntegral`; 6.3.1.6-6.3.1.7 are outside the dialect. Not
+  measured, since the C-IR does not hold them, yet the checker makes them: the conversions inside
+  `sizeof`, `_Alignof` and `typeof` operands, of a case label's constant to the promoted controlling
+  type, of enumerator initializers, array bounds, bit-field widths and `_Static_assert`, the
+  `ToVoid` of `(void)({ ... })`, and a compound assignment's left operand to the computation type
+  and back. Not C.3's: Dumper A's own `IntegralCast` of a redeclared library function's result,
+  which Dumper C reproduces from the same rule as Dumper A. Acceptance: C.0's census over Dumper C's
+  C-IR equals Dumper A's, row by row, before C.6's byte diff.
 - **C.4 Names.** As Dumper A names things: `<stem>__<name>` for file statics, hoisted
   local statics, block-scope `extern`, the parameter and local renames, references bound
   by declaration and never by spelling.
