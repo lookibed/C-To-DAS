@@ -70,9 +70,10 @@ Owned by the implementer. Each lands before the item that needs it.
   states the dialect once: gnu17, clang's default, with `__STDC_VERSION__` `201710L`.
   That is what Part 1 ran; the "C99" of the plan's decision table names the grammar the
   inputs use, not the value of this macro. **(P)**
-  Dumper A runs clang with `-undef` plus the table as `-D` entries, so clang's own
-  predefined names (`__GNUC__`, `__clang__`, `_MSC_VER`) are gone and both dumpers
-  preprocess the same input.
+  Acceptance: a test holds each table to clang: every name clang predefines under the
+  dialect's triple is in the table with clang's value, or in a listed class the table
+  leaves out (the compiler's identity, code generation, CPU features).
+  Dumper A's switch to the table is H.3's, not this item's.
   Probed 2026-11-26 (clang 22.1.8): `-undef` takes the predefined macros from 408 to 8.
   The standard ones stay: `__STDC__` (under the linux triple only), `__STDC_HOSTED__`,
   `__STDC_VERSION__`, `__STDC_UTF_16__`, `__STDC_UTF_32__` and the three `__STDC_EMBED_*`.
@@ -84,7 +85,13 @@ Owned by the implementer. Each lands before the item that needs it.
   clang answers it: `__has_include`, `__has_extension` and `__has_feature` (sqlite3
   picks its atomics by them), `__FILE_NAME__`.
 - **H.3 Dumper A on the own headers.** `-nostdinc` plus `frontend/include/`; the folder
-  counts as external, as the system directories do today. Then delete the glibc special
+  counts as external, as the system directories do today. In the same change Dumper A
+  runs clang with `-undef` plus H.2's table as `-D` entries, so clang's own predefined
+  names (`__GNUC__`, `__clang__`, `_MSC_VER`) are gone and both dumpers preprocess the
+  same input. The two land together: probed 2026-11-26, glibc under `-undef` is another
+  libc. Without `__GNUC__` its `<sys/cdefs.h>` defines `__attribute__` away, so a
+  program's `packed` and `aligned` vanish and its layouts change with no error, and
+  `fopen` and `sscanf` become `fopen64` and `__isoc99_sscanf`. Then delete the glibc special
   cases (`__NO_CTYPE`, the statement-expression `assert`).
   Acceptance: every suite keeps its pass list; every project passes its own check
   (demo-sync, the Lua suite, the project outputs). c2das-ports is regenerated and the
