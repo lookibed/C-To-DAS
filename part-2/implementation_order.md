@@ -234,7 +234,9 @@ Owned by the implementer. Each lands before the item that needs it.
 - **C.5 Output.** Dumper C builds `cir.das`'s `CirTu` values; `write_cir` writes them. No
   second writer.
 - **C.6 The diff and its ratchet.** `frontend/diff.das` byte-compares the two dumpers'
-  C-IR with the macro fields stripped, the one normalization the spec allows. A list per
+  C-IR with the macro fields stripped and the `producer` string set aside, the two
+  normalizations the spec allows: `producer` names the dumper that wrote the text, so it
+  differs by design. A list per
   suite holds the byte-identical inputs. `--dumper a|c` selects the dumper in
   `converter/main.das` and in the suite runners.
   Acceptance: byte-identical on every suite test whose C-IR has no record, union, enum or
