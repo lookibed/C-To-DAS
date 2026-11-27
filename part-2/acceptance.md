@@ -23,7 +23,7 @@ as C. The browser compiles them.
 |---|---|---|---|
 | F1 | Own headers under Dumper A | Each suite's pass list and each project's own check hold with `-nostdinc` and the own headers | CI |
 | F2 | Token stream | Dumper C's preprocessor output equals `clang -E`'s, token by token, on every suite file and every unit of the eight projects | CI |
-| F3 | C-IR, suites | Dumper C's C-IR is byte-identical to Dumper A's on every suite test Dumper A accepts (macro fields stripped) | CI |
+| F3 | C-IR, suites | Dumper C's C-IR is byte-identical to Dumper A's on every suite test Dumper A accepts (macro fields stripped, `producer` set aside) | CI |
 | F4 | C-IR, projects | The same on Lua, PureDOOM, doomgeneric, binjgb, h264bsd-mp4, plmpeg-stream, wasm3, quakegeneric | CI |
 | F5 | Refusals | Dumper C refuses every suite test Dumper A refuses, with file, line and column | CI |
 | F6 | Both dialects | F3 and F4 hold under `linux` and under `msvc` | CI |
